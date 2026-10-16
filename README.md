@@ -4,34 +4,29 @@ Ubuntuサーバーのログイン・公開ポート・SSH設定・アカウン�
 
 **証跡収集用です。侵入なし・脆弱性なし・安全という合格判定は行いません。** 診断対象では設定変更、パッケージ導入、サービス停止、外部への結果送信を行いません。レポートと任意のZIPを新規作成します。`--sudo`はsudoの認証・監査記録を発生させる場合があります。
 
-## Termiusから取得して実行
+## curlで取得して実行（推奨）
 
 自分が管理するUbuntuサーバーに接続し、以下を実行します。GitHubから取得する段階では通信が必要です。診断本体はオフラインで動きます。
 
 ```bash
-git clone https://github.com/tp-li-dev/ubuntu-security-check.git
-cd ubuntu-security-check
-git rev-parse HEAD
-sha256sum -c SHA256SUMS
-# 上の検証がすべてOKであることを確認してから実行
-bash ubuntu-security-check.sh --sudo --zip
+curl --fail --show-error --location --proto '=https' --proto-redir '=https' \
+  --connect-timeout 15 --max-time 120 \
+  https://raw.githubusercontent.com/tp-li-dev/ubuntu-security-check/main/run-from-github.sh \
+  --output run-from-github.sh &&
+bash run-from-github.sh -- --sudo --zip
 ```
 
-`git`がない場合は後述のcurl方式を利用できます。`--sudo`のパスワードはサーバー内で入力してください。通常ユーザーで実行し、必要な読み取りだけsudoを使います。認証失敗時は診断を開始しません。`sudo -n`による各取得で権限が失われた場合はERRORに記録します。
+これで取得・コミットの自動解決・本体のチェックサム検証・診断・Markdown/HTML保存・ZIP作成まで進みます。GitのインストールやコミットSHAの手入力は不要です。取得失敗時は`&&`により実行を止めます。最新の補助スクリプトを使うには同じコマンドを再実行します。
 
-更新は前回と同じフォルダーで実行します。ローカル変更がある場合、勝手に上書きしません。
+`--sudo`のパスワードはサーバー内で入力してください。通常ユーザーで実行し、必要な読み取りだけsudoを使います。認証失敗時は診断を開始しません。`sudo -n`による各取得で権限が失われた場合はERRORに記録します。
 
-```bash
-git pull --ff-only
-git rev-parse HEAD
-sha256sum -c SHA256SUMS
-```
+既定ではPython 3が必要です。Pythonのない最小構成では、後述の完全なSHAを指定する方法と`--format md`を使い、`--zip`を外してください。GitHub APIのレート制限や通信失敗時は診断を開始せず終了します。トークン入力やパッケージの自動導入は行いません。
 
 GitHub上のソースを確認してから実行してください。同じ配布元のチェックサムは、取得内容の整合性確認に使います。配布元そのものの侵害を検出する独立署名ではありません。
 
-## git不要・コミットを固定して取得
+## コミットを手動で固定する場合
 
-GitHubの対象コミット画面で完全な40桁のコミットSHAをコピーします。`main`のような可変参照は補助スクリプトで拒否します。
+既定では`main`をGitHub APIで一度だけ解決し、本体とSHA256SUMSをその同じコミットから取得します。特定バージョンを繰り返し使う場合は、GitHubの対象コミット画面で完全な40桁のSHAをコピーして指定できます。
 
 ```bash
 # 以下の値を、確認した実際の40桁SHAに置き換える
@@ -46,6 +41,16 @@ bash run-from-github.sh --ref "$REF" -- --sudo --zip
 ```
 
 補助スクリプトは本体とSHA256SUMSを同じコミットから取得し、本体の一致を検証してから実行します。ダウンロード失敗・チェックサム不一致時は実行しません。取得ファイルはカレントディレクトリの`ubuntu-security-check-source.*`に残すため、後から確認できます。取得だけ失敗した場合のファイルも残します。
+
+## Gitで管理する場合（任意）
+
+```bash
+git clone https://github.com/tp-li-dev/ubuntu-security-check.git
+cd ubuntu-security-check
+sha256sum -c SHA256SUMS && bash ubuntu-security-check.sh --sudo --zip
+```
+
+更新は`git pull --ff-only`で取得できます。ローカル変更の強制上書きは行いません。
 
 ## オプション
 
@@ -120,6 +125,6 @@ sha256sum -c SHA256SUMS
 python3 tests/test_diagnostic.py
 ```
 
-テストは一時コピー内の診断コマンドを合成データに置き換えます。テスト実行先のSSH設定・認証ログ・鍵を収集しません。レポート生成、HTMLエスケープ、権限、ZIP、チェックサム、未取得・タイムアウト、上書き拒否、配布補助の実行拒否を検証します。実サーバーでの動作検証とは区別してください。
+テストは一時コピー内の診断コマンドを合成データに置き換えます。テスト実行先のSSH設定・認証ログ・鍵を収集しません。レポート生成、HTMLエスケープ、権限、ZIP、チェックサム、未取得・タイムアウト、上書き拒否、コミットの自動解決・引数転送・配布補助の実行拒否を検証します。実サーバーでの動作検証とは区別してください。
 
 スクリプト変更後は`sha256sum ubuntu-security-check.sh run-from-github.sh > SHA256SUMS`を更新してください。

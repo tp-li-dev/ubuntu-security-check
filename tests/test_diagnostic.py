@@ -12,7 +12,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PATH_LINE = 'export PATH=/usr/sbin:/usr/bin:/sbin:/bin'
 MOCK = r'''#!/usr/bin/python3
-import os, pathlib, sys, time
+import hashlib, json, os, pathlib, sys, time
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 if name == 'sudo':
@@ -27,8 +27,14 @@ if name == 'awk':
 if name == 'curl':
     if os.environ.get('USC_TEST_DOWNLOAD_FAIL') == '1': sys.exit(22)
     dest = pathlib.Path(args[args.index('--output') + 1])
-    if dest.name == 'SHA256SUMS':
-        dest.write_text('0' * 64 + '  ubuntu-security-check.sh\n')
+    if dest.name == 'revision.json':
+        if os.environ.get('USC_TEST_BAD_REVISION') == '1':
+            dest.write_text('{"sha": "invalid"}')
+        else:
+            dest.write_text(json.dumps({'sha': 'a' * 40}))
+    elif dest.name == 'SHA256SUMS':
+        digest = hashlib.sha256(b'echo SHOULD_NOT_EXECUTE\n').hexdigest() if os.environ.get('USC_TEST_GOOD_DOWNLOAD') == '1' else '0' * 64
+        dest.write_text(digest + '  ubuntu-security-check.sh\n')
     else:
         dest.write_text('echo SHOULD_NOT_EXECUTE\n')
     sys.exit(0)
@@ -38,7 +44,9 @@ if name == 'ss' and os.environ.get('USC_TEST_FAIL') == '1':
 if name == 'ss' and os.environ.get('USC_TEST_TIMEOUT') == '1':
     time.sleep(8)
 if name == 'bash':
-    if any('/usr/sbin/sshd' in a for a in args):
+    if args and args[0].endswith('/ubuntu-security-check.sh'):
+        print('DIAGNOSTIC_EXECUTED ' + json.dumps(args[1:]))
+    elif any('/usr/sbin/sshd' in a for a in args):
         print('permitrootlogin no\npasswordauthentication no')
     else:
         print('Synthetic composite-command evidence (no host data read)')
@@ -150,7 +158,7 @@ class DiagnosticTests(unittest.TestCase):
         helper = self.base / 'helper.sh'
         helper.write_text((ROOT / 'run-from-github.sh').read_text().replace(
             PATH_LINE, f'export PATH={self.bin}:/usr/sbin:/usr/bin:/sbin:/bin'))
-        for ref in ('main', 'a' * 40):
+        for ref in ('invalid-ref', 'a' * 40):
             result = subprocess.run(['/bin/bash', str(helper), '--ref', ref],
                                     cwd=self.base, text=True, capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 2, result.stderr)
@@ -166,6 +174,27 @@ class DiagnosticTests(unittest.TestCase):
                                 env={**os.environ, 'USC_TEST_DOWNLOAD_FAIL': '1'})
         self.assertEqual(result.returncode, 22)
         self.assertNotIn('Running the diagnostic', result.stdout)
+
+    def test_bootstrap_main_resolution_and_option_forwarding(self):
+        helper = self.base / 'helper.sh'
+        helper.write_text((ROOT / 'run-from-github.sh').read_text().replace(
+            PATH_LINE, f'export PATH={self.bin}:/usr/sbin:/usr/bin:/sbin:/bin'))
+        result = subprocess.run(['/bin/bash', str(helper), '--', '--sudo', '--zip', '--days', '14'],
+                                cwd=self.base, text=True, capture_output=True, timeout=10,
+                                env={**os.environ, 'USC_TEST_GOOD_DOWNLOAD': '1'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Verified diagnostic source at commit: ' + 'a' * 40, result.stdout)
+        self.assertIn('DIAGNOSTIC_EXECUTED ["--sudo", "--zip", "--days", "14"]', result.stdout)
+
+    def test_bootstrap_invalid_resolved_commit_never_executes(self):
+        helper = self.base / 'helper.sh'
+        helper.write_text((ROOT / 'run-from-github.sh').read_text().replace(
+            PATH_LINE, f'export PATH={self.bin}:/usr/sbin:/usr/bin:/sbin:/bin'))
+        result = subprocess.run(['/bin/bash', str(helper)], cwd=self.base,
+                                text=True, capture_output=True, timeout=10,
+                                env={**os.environ, 'USC_TEST_BAD_REVISION': '1'})
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn('DIAGNOSTIC_EXECUTED', result.stdout)
 
 
 if __name__ == '__main__':
