@@ -1,0 +1,4 @@
+/reports/
+/ubuntu-security-check-source.*/
+__pycache__/
+*.pyc
