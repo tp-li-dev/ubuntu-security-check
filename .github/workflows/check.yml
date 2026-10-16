@@ -1,0 +1,21 @@
+name: Validate diagnostics
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash syntax and static checks
+        run: |
+          bash -n ubuntu-security-check.sh run-from-github.sh
+          shellcheck ubuntu-security-check.sh run-from-github.sh
+          sha256sum -c SHA256SUMS
+      - name: Integration and rendering checks
+        run: python3 tests/test_diagnostic.py
