@@ -42,8 +42,8 @@ while (( $# )); do
     *) die "Unknown option: $1" ;;
   esac
 done
-[[ $DAYS =~ ^[1-9][0-9]{0,2}$ ]] && (( DAYS <= 365 )) || die '--days must be 1..365'
-[[ $LIMIT =~ ^[1-9][0-9]{0,2}$ ]] && (( LIMIT >= 5 && LIMIT <= 300 )) || die '--timeout must be 5..300'
+if ! [[ $DAYS =~ ^[1-9][0-9]{0,2}$ ]] || (( DAYS > 365 )); then die '--days must be 1..365'; fi
+if ! [[ $LIMIT =~ ^[1-9][0-9]{0,2}$ ]] || (( LIMIT < 5 || LIMIT > 300 )); then die '--timeout must be 5..300'; fi
 [[ $FORMAT == md || $FORMAT == both ]] || die '--format must be md or both'
 [[ -r /etc/os-release ]] || die 'Linux /etc/os-release is required'
 # Read just the ID field; do not source configuration as executable shell code.
@@ -109,6 +109,7 @@ protected 10-ufw 'UFW firewall state' ufw status verbose
 protected 11-nftables 'nftables rules (may coexist with UFW/container rules)' nft list ruleset
 protected 12-iptables 'IPv4 iptables rules' iptables-save
 protected 13-ip6tables 'IPv6 iptables rules' ip6tables-save
+# shellcheck disable=SC2016 # These fields belong to awk, not the calling Bash.
 collect 14-accounts 'Local accounts (no password hashes)' awk -F: '{print $1 ":uid=" $3 ":gid=" $4 ":home=" $6 ":shell=" $7}' /etc/passwd
 collect 15-admin-groups 'Administrative groups' getent group sudo adm
 collect 16-processes 'Process metadata (arguments/environment excluded)' ps -eo user,pid,ppid,lstart,etimes,pcpu,pmem,comm --sort=-pcpu
@@ -116,10 +117,13 @@ collect 17-services 'Running services' systemctl --no-pager --plain --type=servi
 collect 18-enabled-units 'Enabled unit files' systemctl --no-pager --plain list-unit-files --state=enabled
 collect 19-timers 'Scheduled system timers' systemctl --no-pager --plain list-timers --all
 collect 20-failed-units 'Failed units' systemctl --no-pager --plain --failed
+# shellcheck disable=SC2016 # Variables are intentionally expanded in the child Bash.
 protected 21-persistence-metadata 'Cron and local service file metadata (contents excluded)' bash -c 'for p in /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /var/spool/cron/crontabs /etc/systemd/system /etc/rc.local /etc/ld.so.preload; do if [ -e "$p" ]; then find "$p" -maxdepth 2 -printf "%M %u:%g %TY-%Tm-%TdT%TH:%TM:%TS %p -> %l\n"; fi; done'
-protected 22-ssh-key-fingerprints 'Standard authorized_keys fingerprints (no key contents/comments)' bash -c 'bad=0; while IFS=: read -r name _ uid gid gecos home shell; do [ "$uid" = 0 ] || [ "$uid" -ge 1000 ] || continue; [ "$home" != /nonexistent ] || continue; for key in "$home/.ssh/authorized_keys" "$home/.ssh/authorized_keys2"; do if [ -f "$key" ]; then printf "Account: %s; file: %s\n" "$name" "$key"; stat -c "mode=%a owner=%U:%G modified=%y" "$key"; if ! ssh-keygen -lf "$key" -E sha256 | awk '\''{print $1, $2, $NF}'\''; then bad=1; fi; fi; done; done < /etc/passwd; exit "$bad"'
+# shellcheck disable=SC2016 # The child Bash and awk must receive literal variable expressions.
+protected 22-ssh-key-fingerprints 'Standard authorized_keys fingerprints (no key contents/comments)' bash -o pipefail -c 'bad=0; while IFS=: read -r name _ uid gid gecos home shell; do [ "$uid" = 0 ] || [ "$uid" -ge 1000 ] || continue; [ "$home" != /nonexistent ] || continue; for key in "$home/.ssh/authorized_keys" "$home/.ssh/authorized_keys2"; do if [ -f "$key" ]; then printf "Account: %s; file: %s\n" "$name" "$key"; stat -c "mode=%a owner=%U:%G modified=%y" "$key"; if ! ssh-keygen -lf "$key" -E sha256 | awk '\''{print $1, $2, $NF}'\''; then bad=1; fi; fi; done; done < /etc/passwd; exit "$bad"'
 collect 23-upgrades 'Available updates from existing APT indexes (no index refresh)' apt list --upgradable
 collect 24-apt-index-age 'APT index timestamps (staleness must be reviewed)' bash -c 'find /var/lib/apt/lists -maxdepth 1 -type f -name "*InRelease" -printf "%TY-%Tm-%TdT%TH:%TM:%TS %f\n"; if [ -e /var/run/reboot-required ]; then cat /var/run/reboot-required; fi'
+# shellcheck disable=SC2016 # Expand the loop variable in the child Bash only.
 collect 25-security-services 'Security service state (absence alone is not a finding)' bash -c 'for unit in ufw fail2ban auditd unattended-upgrades apparmor; do printf "\n%s: " "$unit"; systemctl is-active "$unit" || :; done'
 collect 26-disk 'Filesystem usage' df -h -x tmpfs -x devtmpfs
 collect 27-user-units 'Invoking account user service/timer state (may be unavailable)' systemctl --user --no-pager --plain list-units --all --type=service --type=timer
